@@ -1,0 +1,9 @@
+#!/bin/sh
+# /etc/dhcp/dhclient-exit-hooks.d/google_network_hook
+# Must use POSIX single = for comparison in /bin/sh
+if [ "$reason" = "BOUND" ] || [ "$reason" = "RENEW" ] || [ "$reason" = "REBIND" ] || [ "$reason" = "REBOOT" ] || [ "$reason" = "BOUND6" ] || [ "$reason" = "RENEW6" ]; then
+    
+    if [ -x /usr/bin/google_set_metadata_network ]; then
+        /usr/bin/google_set_metadata_network >/dev/null 2>&1 &
+    fi
+fi

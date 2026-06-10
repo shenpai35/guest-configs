@@ -13,9 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-instance=$(curl -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/?recursive=true)
-
-# Ensure that the hostname and IP address are set only for the primary NIC.
-new_ip_address=$(jq -r .networkInterfaces[0].ip <<< $instance)
-new_host_name=$(jq -r .hostname <<< $instance)
-new_ip_address=$new_ip_address new_host_name=$new_host_name google_set_hostname
+# /etc/sysconfig/network/scripts/google_up.sh
+# Called by wicked via POST_UP_SCRIPT when an interface comes online
+INTERFACE=$1
+# 1. Ignore the local loopback interface so we don't spam the Metadata server
+if [ "$INTERFACE" = "lo" ] || [ -z "$INTERFACE" ]; then
+    exit 0
+fi
+# 2. Hand off to the dual-stack master orchestrator.
+# We MUST push this to the background and sever the file descriptors (>/dev/null 2>&1 &).
+# If we do not do this, wicked will freeze waiting for the curl command to finish, 
+# which will stall the entire SUSE boot process.
+if [ -x /usr/bin/google_set_metadata_network ]; then
+    /usr/bin/google_set_metadata_network >/dev/null 2>&1 &
+fi

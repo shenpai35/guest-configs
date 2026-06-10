@@ -1,0 +1,51 @@
+#!/bin/bash
+
+exec 200>/var/lock/google_metadata_network.lock
+flock -e 200
+# --- STEP 1: IDENTIFY PRIMARY NIC ---
+# Dynamically find the interface routing to the internet/MDS (nic0)
+PRIMARY_IFACE=$(ip route show default | head -n 1 | awk '{print $5}')
+if [[ -z "$PRIMARY_IFACE" ]]; then
+    echo "Primary Interface not found"
+fi
+# --- STEP 2: EVALUATE PRIMARY NIC EXCLUSIVELY ---
+HAS_REAL_V4="false"
+if ip -4 addr show dev "$PRIMARY_IFACE" scope global | grep -v "169.254" | grep -q "inet "; then
+    HAS_REAL_V4="true"
+fi
+HAS_V6="false"
+if ip -6 addr show dev "$PRIMARY_IFACE" scope global | grep -q "inet6"; then
+    HAS_V6="true"
+fi
+# --- STEP 3: BOOTSTRAP /ETC/HOSTS AND ROUTES ---
+sed -i '/metadata.google.internal/d' /etc/hosts
+if [[ "$HAS_REAL_V4" == "true" && "$HAS_V6" == "true" ]]; then
+    # Dual-stack: Force IPv4 priority
+    echo "169.254.169.254 metadata.google.internal # Added by Google" >> /etc/hosts
+    # Allow IPv4, Blackhole IPv6 MDS to prevent NM race conditions
+    ip -6 route flush fd20:ce::254/128 2>/dev/null || true
+    ip -6 route add unreachable fd20:ce::254/128 2>/dev/null || true
+elif [[ "$HAS_V6" == "true" ]]; then
+    # IPv6-only: Prioritize IPv6 MDS
+    echo "fd20:ce::254 metadata.google.internal # Added by Google" >> /etc/hosts
+    echo "169.254.169.254 metadata.google.internal # Added by Google" >> /etc/hosts
+else
+    # IPv4-only / Default
+    echo "169.254.169.254 metadata.google.internal # Added by Google" >> /etc/hosts
+    
+fi
+flock -u 200
+# --- STEP 4: FETCH METADATA ---
+instance=$(curl -m 5 -s -f -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/?recursive=true")
+# --- STEP 5: CALL SETTER ---
+if [[ -n "$instance" ]]; then
+    export GOOGLE_METADATA_JSON="$instance"
+    if [[ -f "/usr/bin/google_set_hostname" ]]; then
+        /usr/bin/google_set_hostname
+    else
+        logger -t google_set_metadata_network "Error: /usr/bin/google_set_hostname not found."
+    fi
+else
+    logger -t google_set_metadata_network "Error: Could not retrieve metadata from MDS."
+fi
+

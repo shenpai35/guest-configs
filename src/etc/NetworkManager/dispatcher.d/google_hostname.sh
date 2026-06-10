@@ -13,10 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if [[ $2 == "up" ]]; then
-	instance=$(curl -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/?recursive=true)
-
-	# Ensure that the hostname and IP address are set only for the primary NIC.
-	new_ip_address=$(jq -r .networkInterfaces[0].ip <<< $instance) new_host_name=$(jq -r .hostname <<< $instance) google_set_hostname
+# NetworkManager Hook
+ACTION="$2"
+# Only execute on 'up' or 'dhcp-change' events
+if [[ "$ACTION" != "up" && "$ACTION" != "dhcp4-change" && "$ACTION" != "dhcp6-change" && "$ACTION" != "reapply" ]]; then
+    exit 0
 fi
-
+# Just wake up the core worker. No arguments needed.
+/usr/bin/google_set_metadata_network
